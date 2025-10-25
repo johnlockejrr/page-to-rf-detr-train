@@ -9,6 +9,7 @@ A complete pipeline for converting PAGE-XML ground truth data to COCO format and
 - **Multiple Model Sizes**: Support for Nano, Small, Base, Medium, and Large models
 - **GPU Optimization**: Specialized scripts for RTX 3060 12GB and other GPUs
 - **Early Stopping**: Prevents overfitting with configurable parameters
+- **Resume Training**: Continue training from checkpoints
 - **Image Resizing**: Optional resizing with coordinate scaling
 - **Dataset Splitting**: Optimal train/validation/test splits using scikit-learn
 
@@ -62,6 +63,7 @@ python convert_pagexml_to_coco.py \
 
 ### 2. Train RF-DETR Model
 
+#### Detection Training (Bounding Boxes)
 ```bash
 # Train with default settings
 python train_rf_detr.py \
@@ -78,6 +80,38 @@ python train_rf_detr.py \
     --epochs 50 \
     --early_stopping_patience 7 \
     --early_stopping_min_delta 0.002
+
+# Resume training from checkpoint
+python train_rf_detr.py \
+    --model_size base \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_output \
+    --epochs 20 \
+    --resume ./rf_detr_output/checkpoint_epoch_10.pth
+```
+
+#### Segmentation Training (Pixel-level Masks)
+```bash
+# Train segmentation model (only one model type available)
+python train_rf_detr_segmentation.py \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_seg_output \
+    --epochs 20
+
+# Train with custom parameters
+python train_rf_detr_segmentation.py \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_seg_output \
+    --epochs 30 \
+    --batch_size 2 \
+    --lr 1e-4
+
+# Resume segmentation training
+python train_rf_detr_segmentation.py \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_seg_output \
+    --epochs 20 \
+    --resume ./rf_detr_seg_output/checkpoint_epoch_10.pth
 ```
 
 ### 3. RTX 3060 12GB Optimization
@@ -89,6 +123,27 @@ python train_rtx3060.py \
     --dataset_dir /path/to/coco_dataset \
     --output_dir ./rf_detr_output \
     --epochs 20
+
+# Resume RTX 3060 training from checkpoint
+python train_rtx3060.py \
+    --model_size nano \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_output \
+    --epochs 20 \
+    --resume ./rf_detr_output/checkpoint_epoch_10.pth
+
+# Ultra low memory training (for very limited GPU memory)
+python train_ultra_low_memory.py \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_output \
+    --epochs 20
+
+# Resume ultra low memory training from checkpoint
+python train_ultra_low_memory.py \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir ./rf_detr_output \
+    --epochs 20 \
+    --resume ./rf_detr_output/checkpoint_epoch_10.pth
 ```
 
 ## 📁 Project Structure
@@ -97,7 +152,16 @@ python train_rtx3060.py \
 page-to-rf-detr-train/
 ├── convert_pagexml_to_coco.py    # Main conversion script
 ├── train_rf_detr.py              # General training script
+├── train_rf_detr_segmentation.py # Segmentation training script
+├── train_rf_detr_segmentation_ultra_low_memory.py # Segmentation ultra low memory
+├── train_rf_detr_segmentation_minimal_memory.py   # Segmentation minimal memory
 ├── train_rtx3060.py              # RTX 3060 optimized training
+├── train_ultra_low_memory.py     # Ultra low memory training
+├── check_checkpoint_epoch.py     # Check checkpoint epoch info
+├── infer_rf_detr.py              # Full inference script
+├── infer_rf_detr_segmentation.py # Segmentation inference script
+├── simple_inference_example.py   # Simple inference example
+├── simple_segmentation_example.py # Simple segmentation example
 ├── fix_coco_classes.py           # RF-DETR class indexing fix
 ├── validate_coco_dataset.py      # Dataset validation
 ├── debug_rf_detr.py              # Debugging utilities
@@ -156,16 +220,53 @@ python train_rtx3060.py \
     --epochs 20
 ```
 
+#### Ultra Low Memory Training
+
+```bash
+python train_ultra_low_memory.py \
+    --dataset_dir /path/to/coco_dataset \
+    --output_dir /path/to/output \
+    --epochs 20
+```
+
 **Memory Optimizations:**
+
+**RTX 3060:**
 - Reduced batch sizes
 - Increased gradient accumulation
 - Gradient checkpointing enabled
 - EMA disabled
-- Smaller resolution (560x560)
+- Rectangular resolution (896x640, divisible by 56)
 - Fewer workers
+
+**Ultra Low Memory:**
+- Batch size: 1
+- Gradient accumulation: 16
+- Resolution: 448x448 (ultra small)
+- Workers: 1
+- Auxiliary losses disabled
+- Multi-scale disabled
+- Expanded scales disabled
+
+## 🎯 Detection vs Segmentation
+
+### **Detection Models** (Bounding Boxes)
+- **Output**: Rectangular bounding boxes around text lines
+- **Use Case**: Fast text line detection, OCR preprocessing
+- **Memory**: Lower memory requirements
+- **Speed**: Faster inference
+- **Scripts**: `train_rf_detr.py`, `infer_rf_detr.py`
+
+### **Segmentation Models** (Pixel-level Masks)
+- **Output**: Precise pixel-level masks of text lines
+- **Use Case**: Exact text line boundaries, precise segmentation
+- **Memory**: Higher memory requirements
+- **Speed**: Slower inference
+- **Scripts**: `train_rf_detr_segmentation.py`, `infer_rf_detr_segmentation.py`
 
 ## 🎯 Model Sizes
 
+### Detection Models
 | Size | Batch Size | Memory | Speed | Accuracy | Best For |
 |------|------------|--------|-------|----------|----------|
 | **Nano** | 8 | Low | Fastest | Good | Edge devices, RTX 3060 |
@@ -173,6 +274,15 @@ python train_rtx3060.py \
 | **Base** | 4 | Medium | Good | Good | General use |
 | **Medium** | 3 | High | Slower | Better | High accuracy needs |
 | **Large** | 2 | Highest | Slowest | Best | Maximum accuracy |
+
+### Segmentation Models
+| Size | Batch Size | Memory | Speed | Accuracy | Best For |
+|------|------------|--------|-------|----------|----------|
+| **Nano** | 4 | Medium | Fast | Good | Edge devices |
+| **Small** | 3 | High | Medium | Better | Balanced performance |
+| **Base** | 2 | High | Slower | Good | General use |
+| **Medium** | 2 | Very High | Slow | Better | High accuracy needs |
+| **Large** | 1 | Highest | Slowest | Best | Maximum accuracy |
 
 ## 📊 Expected Performance
 
@@ -215,6 +325,91 @@ tensorboard --logdir /path/to/output
 - **Default patience**: 5 epochs
 - **Min delta**: 0.001
 - **Customizable**: Use `--early_stopping_patience` and `--early_stopping_min_delta`
+
+### Resume Training Strategy
+
+**Check your checkpoint epoch first:**
+```bash
+python check_checkpoint_epoch.py ./rf_detr_output/checkpoint_epoch_50.pth
+```
+
+**Resume training options:**
+
+1. **Continue from where you left off (Recommended):**
+   ```bash
+   # If you started with 100 epochs and stopped at epoch 50
+   python train_rf_detr.py --epochs 100 --resume ./rf_detr_output/checkpoint_epoch_50.pth
+   # This will train epochs 51-100 (50 more epochs)
+   ```
+
+2. **Extend training beyond original plan:**
+   ```bash
+   # Train 100 more epochs (epochs 51-150)
+   python train_rf_detr.py --epochs 150 --resume ./rf_detr_output/checkpoint_epoch_50.pth
+   ```
+
+3. **Train fewer epochs than remaining:**
+   ```bash
+   # Train only 25 more epochs (epochs 51-75)
+   python train_rf_detr.py --epochs 75 --resume ./rf_detr_output/checkpoint_epoch_50.pth
+   ```
+
+## 🔍 Inference
+
+### Quick Inference
+
+```bash
+# Simple inference on a single image
+python simple_inference_example.py
+```
+
+### Full Inference Script
+
+#### Detection Inference (Bounding Boxes)
+```bash
+# Run detection inference with full options
+python infer_rf_detr.py \
+    --model_size small \
+    --checkpoint ./runs/sam_44_mss_coco/checkpoint_best_ema.pth \
+    --image /path/to/your/image.jpg \
+    --output_dir ./inference_results \
+    --confidence 0.5
+```
+
+#### Segmentation Inference (Pixel-level Masks)
+```bash
+# Run segmentation inference with full options
+python infer_rf_detr_segmentation.py \
+    --checkpoint ./runs/sam_44_mss_coco_seg/checkpoint_best_ema.pth \
+    --image /path/to/your/image.jpg \
+    --output_dir ./segmentation_results \
+    --confidence 0.5
+
+# Simple segmentation inference
+python simple_segmentation_example.py
+```
+
+### Manual Inference in Python
+
+```python
+from rfdetr import RFDETRSmall
+import cv2
+
+# Load trained model
+model = RFDETRSmall(pretrain_weights='./runs/sam_44_mss_coco/checkpoint_best_ema.pth')
+
+# Load and preprocess image
+image = cv2.imread('/path/to/your/image.jpg')
+image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+# Run inference
+detections = model.predict(image_rgb)
+
+# Print results
+print(f"Found {len(detections)} text lines")
+for i, detection in enumerate(detections):
+    print(f"Text {i+1}: confidence={detection.confidence:.3f}")
+```
 
 ## 🎨 Customization
 
